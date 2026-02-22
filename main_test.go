@@ -355,7 +355,7 @@ func TestRunWithDepsPrintsVersion(t *testing.T) {
 	}
 
 	got := out.String()
-	want := "zenn-topics " + version + "\n"
+	want := version + "\n"
 	if got != want {
 		t.Fatalf("stdout = %q, want %q", got, want)
 	}

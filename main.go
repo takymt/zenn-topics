@@ -101,7 +101,7 @@ func runWithParsedOptions(ctx context.Context, opts cliOptions, stdout io.Writer
 	}
 
 	if opts.ShowVersion {
-		if _, err := fmt.Fprintf(stdout, "zenn-topics %s\n", version); err != nil {
+		if _, err := fmt.Fprintf(stdout, "%s\n", version); err != nil {
 			return fmt.Errorf("write output: %w", err)
 		}
 		return nil
