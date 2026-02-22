@@ -32,15 +32,20 @@ type topicCache interface {
 }
 
 type runDeps struct {
-	fetch    fetchTopicsFunc
-	cache    topicCache
-	now      func() time.Time
-	cacheTTL time.Duration
+	fetch            fetchTopicsFunc
+	cache            topicCache
+	now              func() time.Time
+	cacheTTL         time.Duration
+	useDefaultCache  bool
+	verboseLogWriter io.Writer
 }
 
 type cliOptions struct {
-	Query   string
-	Refresh bool
+	Query       string
+	Refresh     bool
+	Verbose     bool
+	ShowHelp    bool
+	ShowVersion bool
 }
 
 type diskTopicCache struct {
@@ -53,32 +58,61 @@ type topicsCacheFile struct {
 }
 
 func main() {
-	if err := run(context.Background(), os.Args[1:], os.Stdout, fetchTopics); err != nil {
+	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr, fetchTopics); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, args []string, stdout io.Writer, fetch fetchTopicsFunc) error {
-	cachePath, err := defaultTopicCachePath()
-	if err != nil {
-		return fmt.Errorf("resolve cache path: %w", err)
-	}
-
+func run(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer, fetch fetchTopicsFunc) error {
 	deps := runDeps{
-		fetch:    fetch,
-		cache:    diskTopicCache{path: cachePath},
-		now:      time.Now,
-		cacheTTL: defaultCacheTTL,
+		fetch:           fetch,
+		now:             time.Now,
+		cacheTTL:        defaultCacheTTL,
+		useDefaultCache: true,
 	}
 
-	return runWithDeps(ctx, args, stdout, deps)
+	return runWithDepsIO(ctx, args, stdout, stderr, deps)
 }
 
 func runWithDeps(ctx context.Context, args []string, stdout io.Writer, deps runDeps) error {
+	return runWithDepsIO(ctx, args, stdout, io.Discard, deps)
+}
+
+func runWithDepsIO(ctx context.Context, args []string, stdout io.Writer, stderr io.Writer, deps runDeps) error {
 	opts, err := parseCLIArgs(args)
 	if err != nil {
 		return err
+	}
+
+	if opts.Verbose && deps.verboseLogWriter == nil {
+		deps.verboseLogWriter = stderr
+	}
+
+	return runWithParsedOptions(ctx, opts, stdout, deps)
+}
+
+func runWithParsedOptions(ctx context.Context, opts cliOptions, stdout io.Writer, deps runDeps) error {
+	if opts.ShowHelp {
+		if _, err := io.WriteString(stdout, helpText()); err != nil {
+			return fmt.Errorf("write output: %w", err)
+		}
+		return nil
+	}
+
+	if opts.ShowVersion {
+		if _, err := fmt.Fprintf(stdout, "zenn-topics %s\n", version); err != nil {
+			return fmt.Errorf("write output: %w", err)
+		}
+		return nil
+	}
+
+	if deps.cache == nil && deps.useDefaultCache {
+		cachePath, err := defaultTopicCachePath()
+		if err != nil {
+			return fmt.Errorf("resolve cache path: %w", err)
+		}
+		deps.cache = diskTopicCache{path: cachePath}
 	}
 
 	topics, err := loadTopics(ctx, deps, opts.Refresh)
@@ -109,6 +143,12 @@ func parseCLIArgs(args []string) (cliOptions, error) {
 
 	for _, arg := range args {
 		switch arg {
+		case "-h", "--help":
+			opts.ShowHelp = true
+		case "-v", "--verbose":
+			opts.Verbose = true
+		case "-V", "--version":
+			opts.ShowVersion = true
 		case "--refresh":
 			opts.Refresh = true
 		default:
@@ -119,8 +159,12 @@ func parseCLIArgs(args []string) (cliOptions, error) {
 		}
 	}
 
+	if opts.ShowHelp || opts.ShowVersion {
+		return opts, nil
+	}
+
 	if len(positionals) != 1 {
-		return cliOptions{}, fmt.Errorf("usage: zenn-topics [--refresh] <query>")
+		return cliOptions{}, fmt.Errorf("usage: zenn-topics [options] <query>")
 	}
 
 	opts.Query = strings.TrimSpace(positionals[0])
@@ -129,6 +173,20 @@ func parseCLIArgs(args []string) (cliOptions, error) {
 	}
 
 	return opts, nil
+}
+
+func helpText() string {
+	return strings.Join([]string{
+		"Usage:",
+		"  zenn-topics [options] <query>",
+		"",
+		"Options:",
+		"  -h, --help      Show help",
+		"      --refresh   Bypass cache and refresh topics",
+		"  -v, --verbose   Print verbose logs to stderr",
+		"  -V, --version   Show version",
+		"",
+	}, "\n")
 }
 
 func loadTopics(ctx context.Context, deps runDeps, refresh bool) ([]string, error) {
@@ -144,16 +202,23 @@ func loadTopics(ctx context.Context, deps runDeps, refresh bool) ([]string, erro
 
 	now := deps.now()
 
+	if refresh {
+		deps.verbosef("cache bypassed (--refresh)")
+	}
+
 	if deps.cache != nil && !refresh {
 		slugs, hit, err := deps.cache.Load(now, deps.cacheTTL)
 		if err != nil {
 			return nil, fmt.Errorf("read cache: %w", err)
 		}
 		if hit {
+			deps.verbosef("cache hit (%d topics)", len(slugs))
 			return slugs, nil
 		}
+		deps.verbosef("cache miss or expired")
 	}
 
+	deps.verbosef("fetching topics from network")
 	slugs, err := deps.fetch(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch topics: %w", err)
@@ -163,9 +228,17 @@ func loadTopics(ctx context.Context, deps runDeps, refresh bool) ([]string, erro
 		if err := deps.cache.Save(now, slugs); err != nil {
 			return nil, fmt.Errorf("write cache: %w", err)
 		}
+		deps.verbosef("cache updated (%d topics)", len(slugs))
 	}
 
 	return slugs, nil
+}
+
+func (d runDeps) verbosef(format string, args ...any) {
+	if d.verboseLogWriter == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(d.verboseLogWriter, "verbose: "+format+"\n", args...)
 }
 
 func defaultTopicCachePath() (string, error) {

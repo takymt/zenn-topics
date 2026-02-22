@@ -61,3 +61,32 @@ Add a minimal local cache for parsed topic slugs so repeated searches do not fet
 - [x] Add `--refresh` option
 - [x] Add tests for cache hit/miss/expired behavior
 - [x] Run verification (`mise run check`)
+
+## Phase3: CLI Meta Flags
+
+### Goal
+
+Add basic CLI meta flags for help, version, and debug visibility.
+
+### Scope
+
+- Add `--help` / `-h`
+- Add `--version` / `-V`
+- Add `--verbose` / `-v`
+- Print verbose logs to stderr so stdout remains script-friendly
+
+### Definition of Done
+
+- `--help` prints usage and exits successfully.
+- `--version` prints the CLI version and exits successfully.
+- `--verbose` prints diagnostic logs to stderr during normal execution.
+- Core flag behavior is covered by tests.
+- `mise run check` passes.
+
+### Checklist
+
+- [x] Implement `--help` / `-h`
+- [x] Implement `--version` / `-V`
+- [x] Implement `--verbose` / `-v`
+- [x] Add tests for help/version/verbose behavior
+- [x] Run verification (`mise run check`)

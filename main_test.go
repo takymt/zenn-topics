@@ -38,6 +38,21 @@ func TestParseCLIArgs(t *testing.T) {
 			want: cliOptions{Query: "go", Refresh: true},
 		},
 		{
+			name: "verbose short flag",
+			args: []string{"-v", "go"},
+			want: cliOptions{Query: "go", Verbose: true},
+		},
+		{
+			name: "help long flag",
+			args: []string{"--help"},
+			want: cliOptions{ShowHelp: true},
+		},
+		{
+			name: "version short flag",
+			args: []string{"-V"},
+			want: cliOptions{ShowVersion: true},
+		},
+		{
 			name:    "unknown option",
 			args:    []string{"--bad", "go"},
 			wantErr: "unknown option",
@@ -45,7 +60,7 @@ func TestParseCLIArgs(t *testing.T) {
 		{
 			name:    "missing query",
 			args:    nil,
-			wantErr: "usage: zenn-topics [--refresh] <query>",
+			wantErr: "usage: zenn-topics [options] <query>",
 		},
 	}
 
@@ -309,6 +324,64 @@ func TestRunWithDepsPrintsMatches(t *testing.T) {
 	}
 }
 
+func TestRunWithDepsPrintsHelp(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	err := runWithDeps(context.Background(), []string{"--help"}, &out, runDeps{})
+	if err != nil {
+		t.Fatalf("runWithDeps() error = %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "Usage:") {
+		t.Fatalf("help output missing Usage: %q", got)
+	}
+	if !strings.Contains(got, "--verbose") {
+		t.Fatalf("help output missing --verbose: %q", got)
+	}
+	if !strings.Contains(got, "--version") {
+		t.Fatalf("help output missing --version: %q", got)
+	}
+}
+
+func TestRunWithDepsPrintsVersion(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	err := runWithDeps(context.Background(), []string{"--version"}, &out, runDeps{})
+	if err != nil {
+		t.Fatalf("runWithDeps() error = %v", err)
+	}
+
+	got := out.String()
+	want := "zenn-topics " + version + "\n"
+	if got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestRunWithDepsVerboseWritesStderr(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	err := runWithDepsIO(context.Background(), []string{"--verbose", "go"}, &out, &errOut, runDeps{
+		fetch: func(context.Context) ([]string, error) {
+			return []string{"go"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("runWithDepsIO() error = %v", err)
+	}
+	if out.String() != "go\n" {
+		t.Fatalf("stdout = %q, want %q", out.String(), "go\n")
+	}
+	if !strings.Contains(errOut.String(), "verbose: fetching topics from network") {
+		t.Fatalf("stderr = %q, want verbose fetch message", errOut.String())
+	}
+}
+
 func TestRunWithDepsPrintsNoMatchesMessage(t *testing.T) {
 	t.Parallel()
 
@@ -341,7 +414,7 @@ func TestRunWithDepsMissingQuery(t *testing.T) {
 	if err == nil {
 		t.Fatal("runWithDeps() error = nil, want error")
 	}
-	if !strings.Contains(err.Error(), "usage: zenn-topics [--refresh] <query>") {
+	if !strings.Contains(err.Error(), "usage: zenn-topics [options] <query>") {
 		t.Fatalf("error = %q, want usage message", err)
 	}
 }
