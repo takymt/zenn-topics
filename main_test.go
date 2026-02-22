@@ -4,10 +4,222 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestParseCLIArgs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		args    []string
+		want    cliOptions
+		wantErr string
+	}{
+		{
+			name: "query only",
+			args: []string{"go"},
+			want: cliOptions{Query: "go"},
+		},
+		{
+			name: "refresh before query",
+			args: []string{"--refresh", "go"},
+			want: cliOptions{Query: "go", Refresh: true},
+		},
+		{
+			name: "refresh after query",
+			args: []string{"go", "--refresh"},
+			want: cliOptions{Query: "go", Refresh: true},
+		},
+		{
+			name:    "unknown option",
+			args:    []string{"--bad", "go"},
+			wantErr: "unknown option",
+		},
+		{
+			name:    "missing query",
+			args:    nil,
+			wantErr: "usage: zenn-topics [--refresh] <query>",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := parseCLIArgs(tt.args)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("parseCLIArgs() error = nil, want %q", tt.wantErr)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %q, want substring %q", err, tt.wantErr)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("parseCLIArgs() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("parseCLIArgs() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDiskTopicCacheLoadHit(t *testing.T) {
+	t.Parallel()
+
+	cachePath := filepath.Join(t.TempDir(), "topics.json")
+	cache := diskTopicCache{path: cachePath}
+	now := time.Date(2026, 2, 22, 10, 0, 0, 0, time.UTC)
+
+	if err := cache.Save(now.Add(-30*time.Minute), []string{"go", "golang"}); err != nil {
+		t.Fatalf("cache.Save() error = %v", err)
+	}
+
+	got, hit, err := cache.Load(now, time.Hour)
+	if err != nil {
+		t.Fatalf("cache.Load() error = %v", err)
+	}
+	if !hit {
+		t.Fatal("cache.Load() hit = false, want true")
+	}
+
+	want := []string{"go", "golang"}
+	assertStringSliceEqual(t, got, want)
+}
+
+func TestLoadTopicsFetchesAndWritesCacheOnMiss(t *testing.T) {
+	t.Parallel()
+
+	cachePath := filepath.Join(t.TempDir(), "cache", "topics.json")
+	cache := diskTopicCache{path: cachePath}
+	now := time.Date(2026, 2, 22, 10, 0, 0, 0, time.UTC)
+
+	fetchCalls := 0
+	deps := runDeps{
+		fetch: func(context.Context) ([]string, error) {
+			fetchCalls++
+			return []string{"nextjs", "golang"}, nil
+		},
+		cache:    cache,
+		now:      func() time.Time { return now },
+		cacheTTL: time.Hour,
+	}
+
+	got, err := loadTopics(context.Background(), deps, false)
+	if err != nil {
+		t.Fatalf("loadTopics() error = %v", err)
+	}
+	if fetchCalls != 1 {
+		t.Fatalf("fetchCalls = %d, want 1", fetchCalls)
+	}
+	assertStringSliceEqual(t, got, []string{"nextjs", "golang"})
+
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(cachePath) error = %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(cache file) error = %v", err)
+	}
+	if _, ok := payload["fetched_at"]; !ok {
+		t.Fatalf("cache JSON missing fetched_at: %v", payload)
+	}
+	if _, ok := payload["slugs"]; !ok {
+		t.Fatalf("cache JSON missing slugs: %v", payload)
+	}
+}
+
+func TestLoadTopicsFetchesOnExpiredCache(t *testing.T) {
+	t.Parallel()
+
+	cachePath := filepath.Join(t.TempDir(), "topics.json")
+	cache := diskTopicCache{path: cachePath}
+	now := time.Date(2026, 2, 22, 10, 0, 0, 0, time.UTC)
+	if err := cache.Save(now.Add(-2*time.Hour), []string{"old"}); err != nil {
+		t.Fatalf("cache.Save() error = %v", err)
+	}
+
+	fetchCalls := 0
+	deps := runDeps{
+		fetch: func(context.Context) ([]string, error) {
+			fetchCalls++
+			return []string{"new"}, nil
+		},
+		cache:    cache,
+		now:      func() time.Time { return now },
+		cacheTTL: time.Hour,
+	}
+
+	got, err := loadTopics(context.Background(), deps, false)
+	if err != nil {
+		t.Fatalf("loadTopics() error = %v", err)
+	}
+	if fetchCalls != 1 {
+		t.Fatalf("fetchCalls = %d, want 1", fetchCalls)
+	}
+	assertStringSliceEqual(t, got, []string{"new"})
+
+	cached, hit, err := cache.Load(now, time.Hour)
+	if err != nil {
+		t.Fatalf("cache.Load() error = %v", err)
+	}
+	if !hit {
+		t.Fatal("cache.Load() hit = false, want true after refresh")
+	}
+	assertStringSliceEqual(t, cached, []string{"new"})
+}
+
+func TestLoadTopicsRefreshBypassesFreshCache(t *testing.T) {
+	t.Parallel()
+
+	cachePath := filepath.Join(t.TempDir(), "topics.json")
+	cache := diskTopicCache{path: cachePath}
+	now := time.Date(2026, 2, 22, 10, 0, 0, 0, time.UTC)
+	if err := cache.Save(now.Add(-5*time.Minute), []string{"cached"}); err != nil {
+		t.Fatalf("cache.Save() error = %v", err)
+	}
+
+	fetchCalls := 0
+	deps := runDeps{
+		fetch: func(context.Context) ([]string, error) {
+			fetchCalls++
+			return []string{"fresh"}, nil
+		},
+		cache:    cache,
+		now:      func() time.Time { return now },
+		cacheTTL: time.Hour,
+	}
+
+	got, err := loadTopics(context.Background(), deps, true)
+	if err != nil {
+		t.Fatalf("loadTopics(refresh=true) error = %v", err)
+	}
+	if fetchCalls != 1 {
+		t.Fatalf("fetchCalls = %d, want 1", fetchCalls)
+	}
+	assertStringSliceEqual(t, got, []string{"fresh"})
+
+	cached, hit, err := cache.Load(now, time.Hour)
+	if err != nil {
+		t.Fatalf("cache.Load() error = %v", err)
+	}
+	if !hit {
+		t.Fatal("cache.Load() hit = false, want true")
+	}
+	assertStringSliceEqual(t, cached, []string{"fresh"})
+}
 
 func TestParseTopicSitemapIndex(t *testing.T) {
 	t.Parallel()
@@ -29,14 +241,7 @@ func TestParseTopicSitemapIndex(t *testing.T) {
 		"https://zenn.dev/sitemaps/topic1.xml.gz",
 		"https://zenn.dev/sitemaps/topic2.xml.gz",
 	}
-	if len(got) != len(want) {
-		t.Fatalf("len(got) = %d, want %d; got=%v", len(got), len(want), got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("got[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
+	assertStringSliceEqual(t, got, want)
 }
 
 func TestParseTopicSlugsXML(t *testing.T) {
@@ -54,15 +259,7 @@ func TestParseTopicSlugsXML(t *testing.T) {
 		t.Fatalf("parseTopicSlugsXML() error = %v", err)
 	}
 
-	want := []string{"go", "ローカルllm"}
-	if len(got) != len(want) {
-		t.Fatalf("len(got) = %d, want %d; got=%v", len(got), len(want), got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("got[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
+	assertStringSliceEqual(t, got, []string{"go", "ローカルllm"})
 }
 
 func TestParseTopicSlugsGzip(t *testing.T) {
@@ -79,15 +276,7 @@ func TestParseTopicSlugsGzip(t *testing.T) {
 		t.Fatalf("parseTopicSlugsGzip() error = %v", err)
 	}
 
-	want := []string{"nextjs", "golang"}
-	if len(got) != len(want) {
-		t.Fatalf("len(got) = %d, want %d; got=%v", len(got), len(want), got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("got[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
+	assertStringSliceEqual(t, got, []string{"nextjs", "golang"})
 }
 
 func TestFilterTopics(t *testing.T) {
@@ -97,17 +286,10 @@ func TestFilterTopics(t *testing.T) {
 	got := filterTopics(slugs, "go")
 	want := []string{"golang", "GoRouter"}
 
-	if len(got) != len(want) {
-		t.Fatalf("len(got) = %d, want %d; got=%v", len(got), len(want), got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("got[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
+	assertStringSliceEqual(t, got, want)
 }
 
-func TestRunPrintsMatches(t *testing.T) {
+func TestRunWithDepsPrintsMatches(t *testing.T) {
 	t.Parallel()
 
 	var out bytes.Buffer
@@ -115,9 +297,9 @@ func TestRunPrintsMatches(t *testing.T) {
 		return []string{"rust", "golang", "GoRouter"}, nil
 	}
 
-	err := run(context.Background(), []string{"go"}, &out, fetch)
+	err := runWithDeps(context.Background(), []string{"go"}, &out, runDeps{fetch: fetch})
 	if err != nil {
-		t.Fatalf("run() error = %v", err)
+		t.Fatalf("runWithDeps() error = %v", err)
 	}
 
 	got := out.String()
@@ -127,32 +309,84 @@ func TestRunPrintsMatches(t *testing.T) {
 	}
 }
 
-func TestRunMissingQuery(t *testing.T) {
+func TestRunWithDepsMissingQuery(t *testing.T) {
 	t.Parallel()
 
-	err := run(context.Background(), nil, &bytes.Buffer{}, func(context.Context) ([]string, error) {
-		t.Fatal("fetch should not be called")
-		return nil, nil
+	err := runWithDeps(context.Background(), nil, &bytes.Buffer{}, runDeps{
+		fetch: func(context.Context) ([]string, error) {
+			t.Fatal("fetch should not be called")
+			return nil, nil
+		},
 	})
 	if err == nil {
-		t.Fatal("run() error = nil, want error")
+		t.Fatal("runWithDeps() error = nil, want error")
 	}
-	if !strings.Contains(err.Error(), "usage: zenn-topics <query>") {
+	if !strings.Contains(err.Error(), "usage: zenn-topics [--refresh] <query>") {
 		t.Fatalf("error = %q, want usage message", err)
 	}
 }
 
-func TestRunFetchError(t *testing.T) {
+func TestRunWithDepsLoadError(t *testing.T) {
 	t.Parallel()
 
-	err := run(context.Background(), []string{"go"}, &bytes.Buffer{}, func(context.Context) ([]string, error) {
-		return nil, errors.New("boom")
+	err := runWithDeps(context.Background(), []string{"go"}, &bytes.Buffer{}, runDeps{
+		fetch: func(context.Context) ([]string, error) {
+			return nil, errors.New("boom")
+		},
+		cache:    nil,
+		now:      func() time.Time { return time.Now() },
+		cacheTTL: time.Hour,
 	})
 	if err == nil {
-		t.Fatal("run() error = nil, want error")
+		t.Fatal("runWithDeps() error = nil, want error")
 	}
-	if !strings.Contains(err.Error(), "fetch topics") {
-		t.Fatalf("error = %q, want wrapped fetch error", err)
+	if !strings.Contains(err.Error(), "load topics") {
+		t.Fatalf("error = %q, want wrapped load error", err)
+	}
+}
+
+func TestRunWithDepsRefreshFlagUsesFetch(t *testing.T) {
+	t.Parallel()
+
+	cachePath := filepath.Join(t.TempDir(), "topics.json")
+	cache := diskTopicCache{path: cachePath}
+	now := time.Date(2026, 2, 22, 10, 0, 0, 0, time.UTC)
+	if err := cache.Save(now, []string{"cached"}); err != nil {
+		t.Fatalf("cache.Save() error = %v", err)
+	}
+
+	fetchCalls := 0
+	var out bytes.Buffer
+	err := runWithDeps(context.Background(), []string{"--refresh", "fresh"}, &out, runDeps{
+		fetch: func(context.Context) ([]string, error) {
+			fetchCalls++
+			return []string{"fresh"}, nil
+		},
+		cache:    cache,
+		now:      func() time.Time { return now },
+		cacheTTL: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("runWithDeps() error = %v", err)
+	}
+	if fetchCalls != 1 {
+		t.Fatalf("fetchCalls = %d, want 1", fetchCalls)
+	}
+	if out.String() != "fresh\n" {
+		t.Fatalf("stdout = %q, want %q", out.String(), "fresh\n")
+	}
+}
+
+func assertStringSliceEqual(t *testing.T, got, want []string) {
+	t.Helper()
+
+	if len(got) != len(want) {
+		t.Fatalf("len(got) = %d, want %d; got=%v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got[%d] = %q, want %q", i, got[i], want[i])
+		}
 	}
 }
 
