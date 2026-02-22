@@ -1,0 +1,38 @@
+version: '2'
+
+formatters:
+  enable:
+    - goimports
+
+linters:
+  enable:
+    # Bug prevention
+    - bodyclose
+    - durationcheck
+    - depguard
+    - errcheck
+    - errorlint
+    - govet
+    - nilerr
+    - noctx
+    - staticcheck
+
+    # Code quality
+    - gocritic
+    - ineffassign
+    - revive
+    - unconvert
+    - unused
+
+    # Style
+    - errname
+    - whitespace
+
+  settings:
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+    revive:
+      rules:
+        - name: exported

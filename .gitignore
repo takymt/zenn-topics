@@ -1,0 +1,14 @@
+bin/
+dist/
+zenn-topics
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# local
+.local/
+.env
