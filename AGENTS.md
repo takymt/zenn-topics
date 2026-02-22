@@ -1,5 +1,8 @@
 # Project Instructions
 
+Defensive code and backward compatibility are not required.
+Implement only the minimum code and tests needed to achieve the MVP.
+
 ## Project Goal
 
 `zenn-topics` is a Go CLI that fetches `topics*.xml.gz` files from the Zenn sitemap, parses the XML, and returns a list of topics.
@@ -23,7 +26,7 @@ Follow this workflow for each task unless the user explicitly changes it:
 3. Refine the task, define DoD (Definition of Done), detail the relevant part of `TODO.md`, and ask follow-up questions only if needed.
 4. Consider high-priority product improvement ideas related to the current task while refining the task/TODOs.
 5. Implement the task.
-6. Verify until `mise run` checks, DoD, and pre-commit checks pass.
+6. Verify until `mise run` checks, DoD, and pre-commit checks pass, then create a commit.
 7. Ask implementation questions (if any) and request user review.
 8. Address user review feedback in a loop until finished.
 9. After user review is completed, consider high-priority product improvement ideas before moving on.
@@ -43,6 +46,8 @@ Use classical, pure, state-based tests as the default approach.
 - Prefer deterministic fixtures and pure functions.
 - Isolate network I/O from parsing/search logic so core behavior is easy to test.
 - Avoid tests that depend on live external services unless explicitly requested.
+- Defensive tests and tests that assume backward compatibility are not required.
+- When adding or keeping tests, optimize for maintenance value over branch count or code coverage.
 
 ## Improvement Triggers
 
