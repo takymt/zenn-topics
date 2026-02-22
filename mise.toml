@@ -1,0 +1,42 @@
+[tools]
+go = "1.26.0"
+golangci-lint = "2.9.0"
+lefthook = "2.1.1"
+"go:github.com/x-motemen/gobump/cmd/gobump" = "0.3.0"
+
+[env]
+BIN = "zenn-topics"
+
+[tasks.default]
+depends = ["check"]
+
+[tasks.build]
+run = 'go build -o "${BIN}"'
+
+[tasks.check-build]
+run = "go build ./..."
+
+[tasks.fmt]
+run = "gofmt -w ."
+
+[tasks.check-fmt]
+run = "bash scripts/check-fmt.sh"
+
+[tasks.lint]
+run = "golangci-lint run ./..."
+
+[tasks.test]
+run = "go test ./..."
+
+[tasks.tidy]
+run = "go mod tidy"
+
+[tasks.check]
+depends = ["check-fmt", "lint", "check-build", "test"]
+
+[tasks.hooks]
+run = "lefthook install"
+
+[tasks.bump]
+depends = ["check"]
+run = "bash scripts/bump.sh"

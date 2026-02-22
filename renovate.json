@@ -1,0 +1,28 @@
+{
+  "extends": ["config:recommended"],
+  "automergeType": "pr",
+  "platformAutomerge": true,
+  "packageRules": [
+    {
+      "matchPackageNames": ["go"],
+      "matchManagers": ["gomod", "mise"],
+      "groupName": "go toolchain"
+    },
+    {
+      "matchUpdateTypes": ["patch"],
+      "excludePackageNames": ["go"],
+      "automerge": true
+    },
+    {
+      "matchUpdateTypes": ["minor"],
+      "excludePackageNames": ["go"],
+      "groupName": "minor updates",
+      "schedule": ["before 6am on monday"],
+      "automerge": true
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+# Template Go
+
+## Usage
