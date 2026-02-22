@@ -1,9 +1,9 @@
 version: 2
-project_name: template-go
+project_name: zenn-topics
 
 builds:
   - main: .
-    binary: template-go
+    binary: zenn-topics
     ldflags:
       - '-s -w -X main.revision={{ .ShortCommit }}'
     goos:
@@ -46,4 +46,4 @@ sboms:
 release:
   github:
     owner: takymt
-    name: template-go
+    name: zenn-topics
