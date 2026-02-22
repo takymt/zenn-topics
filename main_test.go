@@ -309,6 +309,26 @@ func TestRunWithDepsPrintsMatches(t *testing.T) {
 	}
 }
 
+func TestRunWithDepsPrintsNoMatchesMessage(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	err := runWithDeps(context.Background(), []string{"nomatch"}, &out, runDeps{
+		fetch: func(context.Context) ([]string, error) {
+			return []string{"go", "rust"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("runWithDeps() error = %v", err)
+	}
+
+	got := out.String()
+	want := "No topics matched query: nomatch\n"
+	if got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
 func TestRunWithDepsMissingQuery(t *testing.T) {
 	t.Parallel()
 

@@ -86,7 +86,15 @@ func runWithDeps(ctx context.Context, args []string, stdout io.Writer, deps runD
 		return fmt.Errorf("load topics: %w", err)
 	}
 
-	for _, slug := range filterTopics(topics, opts.Query) {
+	matches := filterTopics(topics, opts.Query)
+	if len(matches) == 0 {
+		if _, err := fmt.Fprintf(stdout, "No topics matched query: %s\n", opts.Query); err != nil {
+			return fmt.Errorf("write output: %w", err)
+		}
+		return nil
+	}
+
+	for _, slug := range matches {
 		if _, err := fmt.Fprintln(stdout, slug); err != nil {
 			return fmt.Errorf("write output: %w", err)
 		}
