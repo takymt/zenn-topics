@@ -22,9 +22,9 @@ Implement `zenn-topics <query>` as a minimal Go CLI that fetches Zenn topic site
 ## Checklist
 
 - [x] Confirm MVP behavior and DoD with user
-- [ ] Implement sitemap fetch (`topics*.xml.gz`)
-- [ ] Implement gzip + XML parsing to topic slugs (preserve order)
-- [ ] Implement case-insensitive search
-- [ ] Implement CLI `zenn-topics <query>`
-- [ ] Add fixtures/tests (parser/search/CLI behavior)
-- [ ] Run verification (`mise run check`)
+- [x] Implement sitemap fetch (`topics*.xml.gz`)
+- [x] Implement gzip + XML parsing to topic slugs (preserve order)
+- [x] Implement case-insensitive search
+- [x] Implement CLI `zenn-topics <query>`
+- [x] Add fixtures/tests (parser/search/CLI behavior)
+- [x] Run verification (`mise run check`)
