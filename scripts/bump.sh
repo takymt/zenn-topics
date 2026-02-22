@@ -31,11 +31,11 @@ if ! command -v gobump >/dev/null 2>&1; then
   exit 1
 fi
 
-gobump patch -w ./cmd
+gobump patch -w .
 
-new_version="$(sed -nE 's/^[[:space:]]*const[[:space:]]+version[[:space:]]*=[[:space:]]*"([^"]+)".*$/\1/p' cmd/version.go | head -n 1)"
+new_version="$(sed -nE 's/^[[:space:]]*const[[:space:]]+version[[:space:]]*=[[:space:]]*"([^"]+)".*$/\1/p' version.go | head -n 1)"
 if [[ -z "$new_version" ]]; then
-  echo "ERROR: failed to read version from cmd/version.go" >&2
+  echo "ERROR: failed to read version from version.go" >&2
   exit 1
 fi
 
@@ -51,9 +51,9 @@ if git ls-remote --exit-code --tags "$remote" "refs/tags/${tag}" >/dev/null 2>&1
   exit 1
 fi
 
-git add cmd/version.go
+git add version.go
 if git diff --cached --quiet; then
-  echo "ERROR: no version change detected in cmd/version.go" >&2
+  echo "ERROR: no version change detected in version.go" >&2
   exit 1
 fi
 
